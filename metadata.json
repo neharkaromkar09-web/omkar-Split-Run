@@ -1,0 +1,6 @@
+{
+  "name": "AutoSplit AI",
+  "description": "Smart Video Cutter with AI. Analyze video speech, detect complete sentences, speaker changes, and natural pauses, review editable timeline split points, and export real cut clips.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
