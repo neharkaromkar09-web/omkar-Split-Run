@@ -209,8 +209,11 @@ fun EditorScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
-                                        scaleX = state.currentScale
-                                        scaleY = state.currentScale
+                                        scaleX = state.currentTransform.scale
+                                        scaleY = state.currentTransform.scale
+                                        translationX = state.currentTransform.positionX * 300f
+                                        translationY = state.currentTransform.positionY * 300f
+                                        rotationZ = state.currentTransform.rotation
                                     }
                             )
                         }

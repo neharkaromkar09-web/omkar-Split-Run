@@ -68,7 +68,8 @@ fun ExportScreen(
     clips: List<VideoClip>,
     exportState: ExportUiState,
     onBack: () -> Unit,
-    onExportAll: () -> Unit
+    onExportAll: () -> Unit,
+    onExportFullVideo: () -> Unit = {}
 ) {
     BackHandler { onBack() }
 
@@ -342,24 +343,43 @@ fun ExportScreen(
             // Export Actions
             if (!exportState.isExporting && !exportState.isCompleted) {
                 item {
-                    Button(
-                        onClick = onExportAll,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .testTag("export_all_clips_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AutoSplitPrimary,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Icon(imageVector = Icons.Default.FileDownload, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Export All ${clips.size} Clips",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onExportAll,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .testTag("export_all_clips_button"),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AutoSplitPrimary,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Icon(imageVector = Icons.Default.FileDownload, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Export All ${clips.size} Split Clips",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onExportFullVideo,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("export_full_video_button"),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, tint = AutoSplitPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Export Full Video with Splits & Zooms",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = AutoSplitPrimary
+                            )
+                        }
                     }
                 }
             }

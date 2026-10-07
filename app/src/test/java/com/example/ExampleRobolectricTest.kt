@@ -151,4 +151,42 @@ class ExampleRobolectricTest {
         // After zoom effect completes: scale returns to 1.0f
         assertEquals(1.0f, split.getScaleAt(5000L), 0.01f)
     }
+
+    @Test
+    fun testEditProjectAuthoritativeTransforms() {
+        val keyframes = listOf(
+            TransformKeyframe(timestampMs = 8650L, scale = 1.0f),
+            TransformKeyframe(timestampMs = 8950L, scale = 1.25f, positionX = 0.1f),
+            TransformKeyframe(timestampMs = 9250L, scale = 1.0f)
+        )
+
+        val split = SplitPoint(
+            timestampMs = 8950L,
+            keyframes = keyframes
+        )
+
+        val project = com.example.data.model.EditProject(
+            sourceVideoUri = "content://test/video.mp4",
+            durationMs = 20000L,
+            splitPoints = listOf(split),
+            clips = listOf(
+                com.example.data.model.VideoClip(clipIndex = 1, startMs = 0L, endMs = 8950L),
+                com.example.data.model.VideoClip(clipIndex = 2, startMs = 8950L, endMs = 20000L)
+            ),
+            zoomEvents = emptyList()
+        )
+
+        // Frame before zoom
+        val tBefore = project.getTransformAt(5000L)
+        assertEquals(1.0f, tBefore.scale, 0.001f)
+        assertEquals(0.0f, tBefore.positionX, 0.001f)
+
+        // Frame at peak zoom: MUST return scale = 1.25
+        val tPeak = project.getTransformAt(8950L)
+        assertEquals(1.25f, tPeak.scale, 0.01f)
+        assertEquals(0.1f, tPeak.positionX, 0.01f)
+
+        // Verify scale query matches
+        assertEquals(1.25f, project.getScaleAt(8950L), 0.01f)
+    }
 }

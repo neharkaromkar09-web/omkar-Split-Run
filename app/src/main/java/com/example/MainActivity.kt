@@ -130,7 +130,8 @@ class MainActivity : ComponentActivity() {
                                     clips = editorState.clips,
                                     exportState = exportState,
                                     onBack = { viewModel.navigateTo(AppScreen.EDITOR) },
-                                    onExportAll = { viewModel.exportClips() }
+                                    onExportAll = { viewModel.exportClips() },
+                                    onExportFullVideo = { viewModel.exportFullVideo() }
                                 )
                             }
 

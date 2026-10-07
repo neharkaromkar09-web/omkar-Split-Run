@@ -79,7 +79,8 @@ object VideoProcessor {
                     fileSizeBytes = fileSize,
                     fps = captureFps,
                     hasAudio = hasAudio,
-                    mimeType = mimeType
+                    mimeType = mimeType,
+                    rotation = rotation
                 )
             )
         } catch (e: Exception) {

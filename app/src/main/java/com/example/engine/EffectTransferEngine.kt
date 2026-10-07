@@ -46,10 +46,25 @@ object EffectTransferEngine {
                 videoDurationMs = newVideoDurationMs
             )
 
+            val zoomEvent = if (keyframes.isNotEmpty()) {
+                val startTime = keyframes.first().timestampMs
+                val endTime = keyframes.last().timestampMs
+                com.example.data.model.ZoomEvent(
+                    id = java.util.UUID.randomUUID().toString(),
+                    startTimeMs = startTime,
+                    endTimeMs = endTime,
+                    keyframes = keyframes,
+                    type = pattern.zoomDirection,
+                    easingType = pattern.easingType,
+                    intensityMultiplier = 1.0f
+                )
+            } else null
+
             split.copy(
                 keyframes = keyframes,
                 appliedPattern = pattern,
-                zoomIntensityMultiplier = 1.0f
+                zoomIntensityMultiplier = 1.0f,
+                zoomEvent = zoomEvent
             )
         }
     }

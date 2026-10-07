@@ -8,6 +8,8 @@ import com.example.data.local.AutoSplitDatabase
 import com.example.data.local.ProjectEntity
 import com.example.data.model.AnalysisSettings
 import com.example.data.model.EasingType
+import com.example.data.model.EditProject
+import com.example.data.model.FrameTransform
 import com.example.data.model.ReferenceEditProfile
 import com.example.data.model.ReferenceSegmentPattern
 import com.example.data.model.Sensitivity
@@ -17,6 +19,7 @@ import com.example.data.model.TransformKeyframe
 import com.example.data.model.VideoClip
 import com.example.data.model.VideoMetadata
 import com.example.data.model.ZoomDirection
+import com.example.data.model.ZoomEvent
 import com.example.data.repository.ProjectRepository
 import com.example.engine.EffectTransferEngine
 import com.example.engine.ReferenceAnalysisEngine
@@ -68,11 +71,13 @@ data class EditorUiState(
     val selectedVideoUri: Uri? = null,
     val metadata: VideoMetadata? = null,
     val waveform: FloatArray = FloatArray(120) { 0.1f },
+    val editProject: EditProject? = null,
     val splits: List<SplitPoint> = emptyList(),
     val selectedSplitId: String? = null,
     val clips: List<VideoClip> = emptyList(),
     val currentPlaybackMs: Long = 0L,
     val currentScale: Float = 1.0f,
+    val currentTransform: FrameTransform = FrameTransform(1.0f, 0f, 0f, 0f),
     val isPlaying: Boolean = false,
     val timelineZoom: Float = 1.0f,
     val currentProjectId: Long = 0L,
@@ -301,6 +306,15 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
             TransformKeyframe(timestampMs = (targetTime + 300L).coerceAtMost(meta.durationMs), scale = 1.0f)
         )
 
+        val zoomEvent = ZoomEvent(
+            startTimeMs = (targetTime - 300L).coerceAtLeast(0L),
+            endTimeMs = (targetTime + 300L).coerceAtMost(meta.durationMs),
+            keyframes = keyframes,
+            type = refPattern.zoomDirection,
+            easingType = refPattern.easingType,
+            intensityMultiplier = 1.0f
+        )
+
         val newSplit = SplitPoint(
             timestampMs = targetTime,
             reason = SplitReason.MANUAL,
@@ -308,7 +322,8 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
             isAi = false,
             note = "Custom split at ${SplitPoint.formatTimestamp(targetTime)}",
             keyframes = keyframes,
-            appliedPattern = refPattern
+            appliedPattern = refPattern,
+            zoomEvent = zoomEvent
         )
 
         val updated = (_editorState.value.splits + newSplit).sortedBy { it.timestampMs }
@@ -334,7 +349,12 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                 val updatedKeyframes = split.keyframes.map { kf ->
                     kf.copy(timestampMs = (kf.timestampMs + delta).coerceIn(0L, meta.durationMs))
                 }
-                split.copy(timestampMs = clampedTime, keyframes = updatedKeyframes)
+                val updatedZoomEvent = split.zoomEvent?.copy(
+                    startTimeMs = (split.zoomEvent.startTimeMs + delta).coerceIn(0L, meta.durationMs),
+                    endTimeMs = (split.zoomEvent.endTimeMs + delta).coerceIn(0L, meta.durationMs),
+                    keyframes = updatedKeyframes
+                )
+                split.copy(timestampMs = clampedTime, keyframes = updatedKeyframes, zoomEvent = updatedZoomEvent)
             } else split
         }.sortedBy { it.timestampMs }
 
@@ -352,11 +372,12 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
         val clampedIntensity = intensity.coerceIn(0.2f, 2.5f)
         val updated = _editorState.value.splits.map { split ->
             if (split.id == splitId) {
-                split.copy(zoomIntensityMultiplier = clampedIntensity)
+                val updatedZoomEvent = split.zoomEvent?.copy(intensityMultiplier = clampedIntensity)
+                split.copy(zoomIntensityMultiplier = clampedIntensity, zoomEvent = updatedZoomEvent)
             } else split
         }
         _editorState.update { it.copy(splits = updated) }
-        updateLiveScale(_editorState.value.currentPlaybackMs)
+        recomputeClips()
         saveCurrentProject()
     }
 
@@ -392,15 +413,14 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun updateLiveScale(timeMs: Long) {
-        var computedScale = 1.0f
-        for (split in _editorState.value.splits) {
-            val scale = split.getScaleAt(timeMs)
-            if (kotlin.math.abs(scale - 1.0f) > 0.001f) {
-                computedScale = scale
-                break
-            }
+        val project = _editorState.value.editProject
+        val transform = project?.getTransformAt(timeMs) ?: FrameTransform(1.0f, 0f, 0f, 0f)
+        _editorState.update {
+            it.copy(
+                currentScale = transform.scale,
+                currentTransform = transform
+            )
         }
-        _editorState.update { it.copy(currentScale = computedScale) }
     }
 
     fun setPlaying(playing: Boolean) {
@@ -464,36 +484,62 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun recomputeClips() {
         val meta = _editorState.value.metadata ?: return
+        val uri = _editorState.value.selectedVideoUri ?: return
         val splits = _editorState.value.splits.sortedBy { it.timestampMs }
 
+        val allZoomEvents = splits.mapNotNull { it.zoomEvent }
         val clips = mutableListOf<VideoClip>()
         var start = 0L
 
         for (i in splits.indices) {
             val split = splits[i]
+            val clipEnd = split.timestampMs
+            val clipKeyframes = split.keyframes.filter { it.timestampMs in start..clipEnd }
+            val clipZoomEvents = allZoomEvents.filter { it.startTimeMs < clipEnd && it.endTimeMs > start }
             clips.add(
                 VideoClip(
                     clipIndex = i + 1,
                     startMs = start,
-                    endMs = split.timestampMs,
+                    endMs = clipEnd,
                     splitReason = split.reason,
-                    keyframes = split.keyframes
+                    keyframes = clipKeyframes,
+                    zoomEvents = clipZoomEvents
                 )
             )
             start = split.timestampMs
         }
 
         // Final clip to end of video
+        val lastKeyframes = splits.lastOrNull()?.keyframes?.filter { it.timestampMs in start..meta.durationMs } ?: emptyList()
+        val lastZoomEvents = allZoomEvents.filter { it.startTimeMs < meta.durationMs && it.endTimeMs > start }
         clips.add(
             VideoClip(
                 clipIndex = clips.size + 1,
                 startMs = start,
                 endMs = meta.durationMs,
-                splitReason = SplitReason.SENTENCE_COMPLETED
+                splitReason = SplitReason.SENTENCE_COMPLETED,
+                keyframes = lastKeyframes,
+                zoomEvents = lastZoomEvents
             )
         )
 
-        _editorState.update { it.copy(clips = clips) }
+        // Build the authoritative EditProject model consumed identically by preview and render
+        val authoritativeProject = EditProject(
+            sourceVideoUri = uri.toString(),
+            durationMs = meta.durationMs,
+            splitPoints = splits,
+            clips = clips,
+            zoomEvents = allZoomEvents
+        )
+
+        _editorState.update {
+            it.copy(
+                editProject = authoritativeProject,
+                splits = splits,
+                clips = clips
+            )
+        }
+        updateLiveScale(_editorState.value.currentPlaybackMs)
     }
 
     fun previewClip(clip: VideoClip?) {
@@ -527,6 +573,14 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
         if (_exportState.value.isExporting) return
 
+        val authoritativeProject = _editorState.value.editProject ?: EditProject(
+            sourceVideoUri = uri.toString(),
+            durationMs = _editorState.value.metadata?.durationMs ?: 0L,
+            splitPoints = _editorState.value.splits,
+            clips = clipsToExport,
+            zoomEvents = _editorState.value.splits.mapNotNull { it.zoomEvent }
+        )
+
         _exportState.value = ExportUiState(
             isExporting = true,
             currentClipIndex = 1,
@@ -542,7 +596,8 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
             VideoSplitter.exportClips(
                 context = getApplication(),
                 sourceUri = uri,
-                clips = clipsToExport
+                clips = clipsToExport,
+                editProject = authoritativeProject
             ) { progressEvent ->
                 when (progressEvent) {
                     is VideoSplitter.SplitProgress.Progress -> {
@@ -564,6 +619,70 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                             )
                         }
                         saveCurrentProject(status = "Exported")
+                    }
+                    is VideoSplitter.SplitProgress.Failed -> {
+                        _exportState.update {
+                            it.copy(
+                                isExporting = false,
+                                errorMessage = progressEvent.error
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun exportFullVideo() {
+        val uri = _editorState.value.selectedVideoUri ?: return
+        val meta = _editorState.value.metadata ?: return
+        if (_exportState.value.isExporting) return
+
+        val authoritativeProject = _editorState.value.editProject ?: EditProject(
+            sourceVideoUri = uri.toString(),
+            durationMs = meta.durationMs,
+            splitPoints = _editorState.value.splits,
+            clips = _editorState.value.clips,
+            zoomEvents = _editorState.value.splits.mapNotNull { it.zoomEvent }
+        )
+
+        _exportState.value = ExportUiState(
+            isExporting = true,
+            currentClipIndex = 1,
+            totalClips = 1,
+            progress = 0f,
+            exportedFiles = emptyList(),
+            errorMessage = null,
+            isCompleted = false
+        )
+
+        exportJob?.cancel()
+        exportJob = viewModelScope.launch {
+            VideoSplitter.exportFullVideo(
+                context = getApplication(),
+                sourceUri = uri,
+                editProject = authoritativeProject
+            ) { progressEvent ->
+                when (progressEvent) {
+                    is VideoSplitter.SplitProgress.Progress -> {
+                        _exportState.update {
+                            it.copy(
+                                currentClipIndex = 1,
+                                totalClips = 1,
+                                progress = progressEvent.percent
+                            )
+                        }
+                    }
+                    is VideoSplitter.SplitProgress.Completed -> {
+                        _exportState.update {
+                            it.copy(
+                                isExporting = false,
+                                isCompleted = true,
+                                exportedFiles = progressEvent.exportedFiles,
+                                progress = 1f
+                            )
+                        }
+                        saveCurrentProject(status = "Exported Full")
                     }
                     is VideoSplitter.SplitProgress.Failed -> {
                         _exportState.update {
