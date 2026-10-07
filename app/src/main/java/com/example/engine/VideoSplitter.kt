@@ -106,7 +106,14 @@ object VideoSplitter {
                 }
 
                 if (renderSuccess && outputFile.exists() && outputFile.length() > 0) {
-                    exportedFiles.add(outputFile)
+                    // Run automated quality validation check
+                    val check = VideoQualityChecker.validateExportedFile(context, outputFile, clip.durationMs)
+                    if (check.isValid) {
+                        exportedFiles.add(outputFile)
+                    } else {
+                        Log.w(TAG, "Quality check warnings for ${outputFile.name}: ${check.issues}")
+                        exportedFiles.add(outputFile) // Retain file but log warnings
+                    }
                 } else {
                     val err = "Rendering Clip ${clip.clipIndex} failed. File was not created."
                     onProgress(SplitProgress.Failed(err))

@@ -241,13 +241,53 @@ object ReferenceAnalysisEngine {
                 )
             }
 
-            onProgress("Building reference edit profile...", 0.95f)
+            onProgress("Building editing blueprint & DNA...", 0.95f)
+
+            val avgDuration = if (segmentPatterns.isNotEmpty()) (durationMs / (segmentPatterns.size + 1)).coerceAtLeast(1500L) else 3000L
+            val pacingStyle = when {
+                avgDuration < 2400L -> "High Energy Fast Cut"
+                avgDuration < 4200L -> "Dynamic Thought Flow"
+                else -> "Cinematic Thought Pace"
+            }
+
+            val primaryDirection = segmentPatterns.groupBy { it.zoomDirection }
+                .filterKeys { it != ZoomDirection.NO_ZOOM }
+                .maxByOrNull { it.value.size }?.key ?: ZoomDirection.ZOOM_OUT_THEN_IN
+
+            val overallMinScale = segmentPatterns.map { it.scaleMin }.minOrNull() ?: 0.90f
+            val overallMaxScale = segmentPatterns.map { it.scaleMax }.maxOrNull() ?: 1.18f
+            val avgZoomDuration = if (segmentPatterns.isNotEmpty()) segmentPatterns.map { it.zoomDurationMs }.average().toLong() else 650L
+            val avgSplitToZoom = if (segmentPatterns.isNotEmpty()) segmentPatterns.map { it.splitToZoomOffsetMs }.average().toLong() else -120L
+
+            val extractedDna = com.example.data.model.EditingDNA(
+                name = "Analyzed Reference Style",
+                description = "$pacingStyle style learned from reference video. Average thought cadence: ${avgDuration / 1000.0}s.",
+                referenceVideoName = referenceUri.lastPathSegment ?: "Reference Video",
+                referenceDurationMs = durationMs,
+                pacingStyle = pacingStyle,
+                totalCutsDetected = segmentPatterns.size,
+                averageSentenceDurationMs = avgDuration,
+                speechToSplitOffsetMs = 0L,
+                splitToZoomOffsetMs = avgSplitToZoom,
+                zoomDurationMs = avgZoomDuration,
+                holdDurationMs = 300L,
+                zoomDirection = primaryDirection,
+                scaleMin = overallMinScale,
+                scaleMax = overallMaxScale,
+                positionXBias = 0.0f,
+                positionYBias = -0.08f, // Face awareness framing
+                easingType = EasingType.EASE_IN_OUT,
+                normalizedCurve = segmentPatterns.firstOrNull()?.normalizedCurve ?: com.example.data.model.EditingDNA.defaultCurve(primaryDirection, overallMinScale, overallMaxScale),
+                segmentPatterns = segmentPatterns,
+                isBuiltIn = false
+            )
 
             val profile = ReferenceEditProfile(
                 referenceVideoUri = referenceUri.toString(),
                 referenceDurationMs = durationMs,
                 totalCutsDetected = segmentPatterns.size,
-                patterns = segmentPatterns
+                patterns = segmentPatterns,
+                editingDna = extractedDna
             )
 
             profileCache[cacheKey] = profile

@@ -91,7 +91,8 @@ data class ReferenceEditProfile(
     val referenceVideoUri: String,
     val referenceDurationMs: Long,
     val totalCutsDetected: Int,
-    val patterns: List<ReferenceSegmentPattern> = emptyList()
+    val patterns: List<ReferenceSegmentPattern> = emptyList(),
+    val editingDna: EditingDNA? = null
 )
 
 data class ZoomEvent(

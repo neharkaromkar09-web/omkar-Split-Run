@@ -67,14 +67,18 @@ fun AnalysisScreen(
     )
 
     val steps = listOf(
-        "Preparing video & metadata...",
-        "Extracting audio...",
-        "Analyzing speech & rhythm...",
-        "Detecting sentences & thoughts...",
-        "Detecting speaker changes...",
-        "Analyzing video scene cuts...",
-        "Fusing signals & calculating splits...",
-        "Analysis complete."
+        "1. Importing Reference",
+        "2. Extracting Audio",
+        "3. Detecting Speech",
+        "4. Detecting Sentences",
+        "5. Detecting Splits",
+        "6. Detecting Zooms",
+        "7. Extracting Keyframes",
+        "8. Building Editing Blueprint",
+        "9. Analyzing Original",
+        "10. Applying Editing Style",
+        "11. Rendering Preview",
+        "12. Ready!"
     )
 
     Column(
@@ -213,26 +217,20 @@ fun AnalysisScreen(
 
                         Spacer(modifier = Modifier.height(20.dp))
 
-                        // Steps Progress checklist
+                        // Steps Progress checklist (12 stages)
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            steps.take(6).forEach { stepText ->
-                                val isDone = when (stepText) {
-                                    steps[0] -> animatedProgress > 0.08f
-                                    steps[1] -> animatedProgress > 0.35f
-                                    steps[2] -> animatedProgress > 0.50f
-                                    steps[3] -> animatedProgress > 0.62f
-                                    steps[4] -> animatedProgress > 0.75f
-                                    else -> animatedProgress > 0.88f
-                                }
-                                val isCurrent = !isDone && analysisState.stage.contains(stepText.substring(0, 10), ignoreCase = true)
+                            steps.forEachIndexed { index, stepText ->
+                                val stepThreshold = (index + 1) / 12f
+                                val isDone = animatedProgress >= stepThreshold || (index == 0 && animatedProgress > 0.05f)
+                                val isCurrent = !isDone && (analysisState.stage.contains(stepText.substring(0, 5)) || animatedProgress >= (index / 12f))
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         modifier = Modifier
-                                            .size(18.dp)
+                                            .size(16.dp)
                                             .clip(CircleShape)
                                             .background(
                                                 if (isDone) Color(0xFF10B981)
@@ -246,19 +244,20 @@ fun AnalysisScreen(
                                                 imageVector = Icons.Default.CheckCircle,
                                                 contentDescription = null,
                                                 tint = Color.White,
-                                                modifier = Modifier.size(14.dp)
+                                                modifier = Modifier.size(12.dp)
                                             )
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = stepText,
                                         style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                            fontSize = 12.sp
                                         ),
                                         color = if (isCurrent) AutoSplitPrimary
                                         else if (isDone) MaterialTheme.colorScheme.onSurface
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                                     )
                                 }
                             }

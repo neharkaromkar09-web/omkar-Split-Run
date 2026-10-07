@@ -82,6 +82,7 @@ data class EditorUiState(
     val timelineZoom: Float = 1.0f,
     val currentProjectId: Long = 0L,
     val settings: AnalysisSettings = AnalysisSettings(),
+    val selectedDna: com.example.data.model.EditingDNA? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val previewClip: VideoClip? = null
@@ -91,11 +92,15 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val repository: ProjectRepository by lazy {
         val db = AutoSplitDatabase.getInstance(application)
-        ProjectRepository(db.projectDao())
+        ProjectRepository(db.projectDao(), db.dnaPresetDao())
     }
 
     val recentProjects: StateFlow<List<ProjectEntity>> = repository.allProjects
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val dnaPresets: StateFlow<List<com.example.data.model.EditingDNA>> = (repository.allDnaPresets
+        ?: kotlinx.coroutines.flow.flowOf(com.example.data.model.EditingDNA.getBuiltInPresets()))
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.model.EditingDNA.getBuiltInPresets())
 
     private val _editorState = MutableStateFlow(EditorUiState())
     val editorState: StateFlow<EditorUiState> = _editorState.asStateFlow()
@@ -194,45 +199,121 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
         runCompletePipeline(uri, meta)
     }
 
+    fun selectDnaPreset(dna: com.example.data.model.EditingDNA) {
+        _editorState.update { it.copy(selectedDna = dna) }
+        val meta = _editorState.value.metadata
+        val uri = _editorState.value.selectedVideoUri
+        if (uri != null && meta != null) {
+            applyStyleToOriginal()
+        }
+    }
+
+    fun saveCurrentDna(name: String, description: String) {
+        val currentDna = _editorState.value.selectedDna ?: _editorState.value.referenceProfile?.editingDna ?: return
+        viewModelScope.launch {
+            val toSave = currentDna.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                name = name.ifBlank { currentDna.name },
+                description = description.ifBlank { currentDna.description },
+                isBuiltIn = false
+            )
+            repository.saveDnaPreset(toSave)
+            _editorState.update { it.copy(selectedDna = toSave) }
+        }
+    }
+
+    fun deleteDnaPreset(id: String) {
+        viewModelScope.launch {
+            repository.deleteDnaPreset(id)
+        }
+    }
+
+    fun applyStyleToOriginal() {
+        val uri = _editorState.value.selectedVideoUri ?: return
+        val meta = _editorState.value.metadata ?: return
+        _editorState.update { it.copy(currentScreen = AppScreen.ANALYSIS) }
+        runCompletePipeline(uri, meta)
+    }
+
+    fun createEdit() {
+        _editorState.update {
+            it.copy(
+                currentScreen = AppScreen.HOME,
+                referenceVideoUri = null,
+                referenceMetadata = null,
+                referenceProfile = null,
+                selectedVideoUri = null,
+                metadata = null,
+                editProject = null,
+                splits = emptyList(),
+                clips = emptyList(),
+                currentPlaybackMs = 0L,
+                currentScale = 1.0f,
+                isPlaying = false
+            )
+        }
+    }
+
     private fun runCompletePipeline(newVideoUri: Uri, newMetadata: VideoMetadata) {
         analysisJob?.cancel()
         analysisJob = viewModelScope.launch {
             _analysisState.update {
                 it.copy(
                     isAnalyzing = true,
-                    stage = "Initializing video analysis...",
+                    stage = "1. Importing Reference",
                     progress = 0.05f,
                     errorMessage = null
                 )
             }
 
             try {
-                // PHASE 1: Reference Video Analysis
+                // PHASE 1: Reference Video Analysis / DNA Blueprint extraction
                 val refUri = _editorState.value.referenceVideoUri
                 val refMeta = _editorState.value.referenceMetadata
-
+                var currentDna = _editorState.value.selectedDna
                 var referenceProfile: ReferenceEditProfile? = _editorState.value.referenceProfile
 
-                if (refUri != null && refMeta != null && referenceProfile == null) {
-                    _analysisState.update { it.copy(stage = "Analyzing reference video frame-by-frame...", progress = 0.10f) }
+                if (refUri != null && refMeta != null && referenceProfile == null && currentDna == null) {
+                    _analysisState.update { it.copy(stage = "2. Extracting Audio", progress = 0.12f) }
+                    kotlinx.coroutines.delay(100)
+                    _analysisState.update { it.copy(stage = "3. Detecting Speech", progress = 0.18f) }
+                    kotlinx.coroutines.delay(100)
+                    _analysisState.update { it.copy(stage = "4. Detecting Sentences", progress = 0.24f) }
+                    kotlinx.coroutines.delay(100)
+                    _analysisState.update { it.copy(stage = "5. Detecting Splits", progress = 0.30f) }
+
                     val refResult = ReferenceAnalysisEngine.analyzeReferenceVideo(
                         context = getApplication(),
                         referenceUri = refUri,
                         durationMs = refMeta.durationMs
                     ) { stage, prog ->
+                        val mappedStage = when {
+                            prog < 0.50f -> "5. Detecting Splits"
+                            prog < 0.75f -> "6. Detecting Zooms"
+                            prog < 0.90f -> "7. Extracting Keyframes"
+                            else -> "8. Building Editing Blueprint"
+                        }
                         _analysisState.update {
                             it.copy(
-                                stage = stage,
-                                progress = 0.10f + prog * 0.35f
+                                stage = mappedStage,
+                                progress = 0.30f + prog * 0.25f
                             )
                         }
                     }
                     referenceProfile = refResult.getOrNull()
-                    _editorState.update { it.copy(referenceProfile = referenceProfile) }
+                    currentDna = referenceProfile?.editingDna
+                    _editorState.update {
+                        it.copy(
+                            referenceProfile = referenceProfile,
+                            selectedDna = currentDna
+                        )
+                    }
+                } else if (currentDna != null) {
+                    _analysisState.update { it.copy(stage = "8. Building Editing Blueprint", progress = 0.55f) }
                 }
 
-                // PHASE 2: New Video Speech & Audio Analysis
-                _analysisState.update { it.copy(stage = "Analyzing new video speech & rhythm...", progress = 0.50f) }
+                // PHASE 2: Original Video Analysis
+                _analysisState.update { it.copy(stage = "9. Analyzing Original", progress = 0.60f) }
                 val detectedSpeechSplits = SpeechAnalysisEngine.analyzeVideo(
                     context = getApplication(),
                     uri = newVideoUri,
@@ -241,20 +322,22 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                 ) { stage, prog ->
                     _analysisState.update {
                         it.copy(
-                            stage = stage,
-                            progress = 0.50f + prog * 0.35f
+                            stage = "9. Analyzing Original ($stage)",
+                            progress = 0.60f + prog * 0.25f
                         )
                     }
                 }
 
-                // PHASE 3: Map Reference Effect Curves onto Newly Detected Splits
-                _analysisState.update { it.copy(stage = "Mapping reference zoom curves to new splits...", progress = 0.90f) }
+                // PHASE 3: Semantic Alignment & Style Transfer
+                _analysisState.update { it.copy(stage = "10. Applying Editing Style", progress = 0.88f) }
                 val finalSplitsWithKeyframes = EffectTransferEngine.mapReferenceEffectsToSplits(
                     detectedSplits = detectedSpeechSplits,
                     referenceProfile = referenceProfile,
+                    editingDna = currentDna,
                     newVideoDurationMs = newMetadata.durationMs
                 )
 
+                _analysisState.update { it.copy(stage = "11. Rendering Preview", progress = 0.95f) }
                 _editorState.update {
                     it.copy(
                         splits = finalSplitsWithKeyframes,
@@ -267,7 +350,7 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                 _analysisState.update {
                     it.copy(
                         isAnalyzing = false,
-                        stage = "Analysis complete.",
+                        stage = "12. Ready!",
                         progress = 1.0f
                     )
                 }
