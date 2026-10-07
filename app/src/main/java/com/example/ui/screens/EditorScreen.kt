@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,6 +83,7 @@ fun EditorScreen(
     onAddSplit: () -> Unit,
     onSelectSplit: (String?) -> Unit,
     onUpdateSplitTime: (String, Long) -> Unit,
+    onUpdateZoomIntensity: (String, Float) -> Unit = { _, _ -> },
     onDeleteSplit: (String) -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
@@ -204,8 +206,36 @@ fun EditorScreen(
                                         vv.seekTo(state.currentPlaybackMs.toInt())
                                     }
                                 },
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = state.currentScale
+                                        scaleY = state.currentScale
+                                    }
                             )
+                        }
+
+                        // Live Zoom Badge (top right)
+                        if (kotlin.math.abs(state.currentScale - 1.0f) > 0.01f) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(12.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AutoSplitPrimary.copy(alpha = 0.85f))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (state.currentScale > 1.0f)
+                                        "↑ ZOOM IN ${String.format("%.2fx", state.currentScale)}"
+                                    else
+                                        "↓ ZOOM OUT ${String.format("%.2fx", state.currentScale)}",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                )
+                            }
                         }
 
                         // Play/Pause Overlay Button
@@ -389,6 +419,9 @@ fun EditorScreen(
                         splitIndex = selectedSplitIndex,
                         onMoveTimeOffset = { deltaMs ->
                             onUpdateSplitTime(selectedSplit.id, selectedSplit.timestampMs + deltaMs)
+                        },
+                        onUpdateZoomIntensity = { newIntensity ->
+                            onUpdateZoomIntensity(selectedSplit.id, newIntensity)
                         },
                         onDelete = {
                             onDeleteSplit(selectedSplit.id)

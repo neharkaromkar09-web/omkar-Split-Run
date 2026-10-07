@@ -68,6 +68,20 @@ class ProjectRepository(private val projectDao: ProjectDao) {
                 obj.put("confidence", split.confidence.toDouble())
                 obj.put("isAi", split.isAi)
                 obj.put("note", split.note)
+                obj.put("zoomIntensityMultiplier", split.zoomIntensityMultiplier.toDouble())
+
+                val kfArray = JSONArray()
+                for (kf in split.keyframes) {
+                    val kfObj = JSONObject()
+                    kfObj.put("timestampMs", kf.timestampMs)
+                    kfObj.put("scale", kf.scale.toDouble())
+                    kfObj.put("positionX", kf.positionX.toDouble())
+                    kfObj.put("positionY", kf.positionY.toDouble())
+                    kfObj.put("rotation", kf.rotation.toDouble())
+                    kfArray.put(kfObj)
+                }
+                obj.put("keyframes", kfArray)
+
                 jsonArray.put(obj)
             }
             return jsonArray.toString()
@@ -87,6 +101,25 @@ class ProjectRepository(private val projectDao: ProjectDao) {
                     val confidence = obj.optDouble("confidence", 0.9).toFloat()
                     val isAi = obj.optBoolean("isAi", true)
                     val note = obj.optString("note", "")
+                    val zoomIntensity = obj.optDouble("zoomIntensityMultiplier", 1.0).toFloat()
+
+                    val keyframes = mutableListOf<com.example.data.model.TransformKeyframe>()
+                    val kfArray = obj.optJSONArray("keyframes")
+                    if (kfArray != null) {
+                        for (k in 0 until kfArray.length()) {
+                            val kfObj = kfArray.getJSONObject(k)
+                            keyframes.add(
+                                com.example.data.model.TransformKeyframe(
+                                    timestampMs = kfObj.optLong("timestampMs", 0L),
+                                    scale = kfObj.optDouble("scale", 1.0).toFloat(),
+                                    positionX = kfObj.optDouble("positionX", 0.0).toFloat(),
+                                    positionY = kfObj.optDouble("positionY", 0.0).toFloat(),
+                                    rotation = kfObj.optDouble("rotation", 0.0).toFloat()
+                                )
+                            )
+                        }
+                    }
+
                     list.add(
                         SplitPoint(
                             id = if (id.isNotEmpty()) id else java.util.UUID.randomUUID().toString(),
@@ -94,7 +127,9 @@ class ProjectRepository(private val projectDao: ProjectDao) {
                             reason = reason,
                             confidence = confidence,
                             isAi = isAi,
-                            note = note
+                            note = note,
+                            keyframes = keyframes,
+                            zoomIntensityMultiplier = zoomIntensity
                         )
                     )
                 }

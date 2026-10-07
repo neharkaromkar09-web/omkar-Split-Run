@@ -6,6 +6,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,9 +26,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SwitchVideo
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,6 +44,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -61,38 +68,53 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.local.ProjectEntity
 import com.example.data.model.SplitPoint
+import com.example.data.model.VideoMetadata
 import com.example.ui.components.AppHeader
 import com.example.ui.theme.AutoSplitPrimary
 import com.example.ui.theme.AutoSplitSecondary
+import com.example.ui.theme.AutoSplitTertiary
 
 @Composable
 fun HomeScreen(
+    referenceMetadata: VideoMetadata?,
+    newVideoMetadata: VideoMetadata?,
     recentProjects: List<ProjectEntity>,
-    onVideoSelected: (Uri, Boolean) -> Unit,
+    onReferenceVideoSelected: (Uri) -> Unit,
+    onNewVideoSelected: (Uri) -> Unit,
+    onStartPipeline: () -> Unit,
     onOpenProject: (ProjectEntity) -> Unit,
     onDeleteProject: (Long) -> Unit,
     onNavigateToProjects: () -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
-    // Mode tracker for which quick tool triggered video picking
-    var startWithAnalysis by remember { mutableStateOf(true) }
+    var pickingTarget by remember { mutableStateOf<String>("new") } // "reference" or "new"
 
-    // Android Photo/Video Picker (Zero-permission recommended)
     val videoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
-        uri?.let { onVideoSelected(it, startWithAnalysis) }
+        uri?.let {
+            if (pickingTarget == "reference") {
+                onReferenceVideoSelected(it)
+            } else {
+                onNewVideoSelected(it)
+            }
+        }
     }
 
-    // Fallback GetContent picker for diverse formats
     val getContentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { onVideoSelected(it, startWithAnalysis) }
+        uri?.let {
+            if (pickingTarget == "reference") {
+                onReferenceVideoSelected(it)
+            } else {
+                onNewVideoSelected(it)
+            }
+        }
     }
 
-    fun launchVideoPicker(withAnalysis: Boolean = true) {
-        startWithAnalysis = withAnalysis
+    fun pickVideo(target: String) {
+        pickingTarget = target
         try {
             videoPickerLauncher.launch(
                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
@@ -115,30 +137,28 @@ fun HomeScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 80.dp)
+            contentPadding = PaddingValues(bottom = 85.dp)
         ) {
-            // MAIN IMPORT CARD
+            // HERO BANNER
             item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .shadow(6.dp, RoundedCornerShape(24.dp))
-                        .testTag("main_import_card"),
-                    shape = RoundedCornerShape(24.dp),
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                        .shadow(4.dp, RoundedCornerShape(22.dp)),
+                    shape = RoundedCornerShape(22.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(18.dp)
+                            .padding(16.dp)
                     ) {
-                        // Hero Illustration
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(160.dp)
-                                .clip(RoundedCornerShape(18.dp))
+                                .height(140.dp)
+                                .clip(RoundedCornerShape(16.dp))
                                 .background(Color(0xFFEEF2FF)),
                             contentAlignment = Alignment.Center
                         ) {
@@ -150,13 +170,13 @@ fun HomeScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         Text(
-                            text = "Import Your Video",
+                            text = "Reference Style AutoSplit",
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 21.sp
+                                fontSize = 20.sp
                             ),
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -164,47 +184,91 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "Let AI analyze your video and automatically find the best split points.",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Reproduce cut rhythm, zoom-in/out curves, and easing from a reference video onto your new video's speech thoughts.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
 
-                        Spacer(modifier = Modifier.height(18.dp))
+            // DUAL VIDEO SLOTS: REFERENCE VIDEO & NEW VIDEO
+            item {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text(
+                        text = "1. Reference Video (Editing Style Template)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                        Button(
-                            onClick = { launchVideoPicker(withAnalysis = true) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .testTag("import_video_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = AutoSplitPrimary,
-                                contentColor = Color.White
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                    VideoSlotCard(
+                        slotTitle = "Reference Video",
+                        slotSubtitle = "Extract cuts, zoom-in/out curves & timing",
+                        metadata = referenceMetadata,
+                        badgeColor = AutoSplitSecondary,
+                        badgeText = "STYLE TEMPLATE",
+                        onPick = { pickVideo("reference") },
+                        testTag = "pick_reference_video_button"
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "2. New Video (Content to Edit)",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    VideoSlotCard(
+                        slotTitle = "New Video",
+                        slotSubtitle = "Speech & thoughts analyzed for new split points",
+                        metadata = newVideoMetadata,
+                        badgeColor = AutoSplitPrimary,
+                        badgeText = "CONTENT TO EDIT",
+                        onPick = { pickVideo("new") },
+                        testTag = "pick_new_video_button"
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    // PRIMARY CTA BUTTON
+                    val canStart = newVideoMetadata != null
+                    Button(
+                        onClick = onStartPipeline,
+                        enabled = canStart,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("start_autosplit_pipeline_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AutoSplitPrimary,
+                            contentColor = Color.White
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (referenceMetadata != null) "Transfer Style & AutoSplit Video" else "Analyze Speech & AutoSplit Video",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Import Video",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                            )
-                        }
+                        )
                     }
                 }
             }
 
             // QUICK TOOLS SECTION
             item {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Text(
                         text = "Quick Tools",
                         style = MaterialTheme.typography.titleMedium.copy(
@@ -214,28 +278,28 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         QuickToolCard(
-                            emoji = "🎤",
-                            title = "Analysis Split",
-                            subtitle = "Split by Speech",
+                            emoji = "🎬",
+                            title = "Reference Split",
+                            subtitle = "Learn Zoom Curves",
                             modifier = Modifier.weight(1f),
                             testTag = "quick_tool_analysis_split",
-                            onClick = { launchVideoPicker(withAnalysis = true) }
+                            onClick = { pickVideo("reference") }
                         )
 
                         QuickToolCard(
-                            emoji = "✂️",
-                            title = "Manual Split",
-                            subtitle = "Split Manually",
+                            emoji = "🎤",
+                            title = "Speech Split",
+                            subtitle = "Split by Thoughts",
                             modifier = Modifier.weight(1f),
-                            testTag = "quick_tool_manual_split",
-                            onClick = { launchVideoPicker(withAnalysis = false) }
+                            testTag = "quick_tool_speech_split",
+                            onClick = { pickVideo("new") }
                         )
                     }
 
@@ -246,18 +310,18 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         QuickToolCard(
-                            emoji = "🔊",
-                            title = "Silence Detection",
-                            subtitle = "Find Pauses",
+                            emoji = "✂️",
+                            title = "Manual Split",
+                            subtitle = "Custom Keyframes",
                             modifier = Modifier.weight(1f),
-                            testTag = "quick_tool_silence_detection",
-                            onClick = { launchVideoPicker(withAnalysis = true) }
+                            testTag = "quick_tool_manual_split",
+                            onClick = { pickVideo("new") }
                         )
 
                         QuickToolCard(
                             emoji = "📁",
                             title = "My Projects",
-                            subtitle = "Your Videos",
+                            subtitle = "Saved Edits",
                             modifier = Modifier.weight(1f),
                             testTag = "quick_tool_my_projects",
                             onClick = onNavigateToProjects
@@ -310,24 +374,16 @@ fun HomeScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 32.dp, horizontal = 20.dp),
+                                .padding(vertical = 28.dp, horizontal = 20.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.surface),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.VideoLibrary,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Icon(
+                                imageVector = Icons.Default.VideoLibrary,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
                             Text(
                                 text = "No projects yet",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -335,7 +391,7 @@ fun HomeScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Import a video to get started.",
+                                text = "Select reference & new video to get started.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -350,6 +406,107 @@ fun HomeScreen(
                         onDelete = { onDeleteProject(project.id) }
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun VideoSlotCard(
+    slotTitle: String,
+    slotSubtitle: String,
+    metadata: VideoMetadata?,
+    badgeColor: Color,
+    badgeText: String,
+    onPick: () -> Unit,
+    testTag: String
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onPick() }
+            .testTag(testTag),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (metadata != null) Color(0xFFF8FAFC) else MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (metadata != null) badgeColor.copy(alpha = 0.15f) else Color(0xFFF1F5F9)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (metadata != null) Icons.Default.CheckCircle else Icons.Default.Movie,
+                    contentDescription = null,
+                    tint = if (metadata != null) badgeColor else Color(0xFF64748B),
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(14.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (metadata != null) metadata.fileName else slotTitle,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        ),
+                        maxLines = 1,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = badgeColor.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = badgeText,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = badgeColor
+                            ),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(3.dp))
+
+                Text(
+                    text = if (metadata != null)
+                        "${metadata.formattedDuration} • ${metadata.resolutionText} • ${metadata.formattedSize}"
+                    else slotSubtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            OutlinedButton(
+                onClick = onPick,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text(
+                    text = if (metadata != null) "Change" else "Select",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -427,7 +584,6 @@ fun RecentProjectItem(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Thumbnail Box
             Box(
                 modifier = Modifier
                     .size(64.dp)

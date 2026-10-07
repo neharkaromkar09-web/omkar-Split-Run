@@ -7,12 +7,19 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.AutoSplitDatabase
 import com.example.data.local.ProjectEntity
 import com.example.data.model.AnalysisSettings
+import com.example.data.model.EasingType
+import com.example.data.model.ReferenceEditProfile
+import com.example.data.model.ReferenceSegmentPattern
 import com.example.data.model.Sensitivity
 import com.example.data.model.SplitPoint
 import com.example.data.model.SplitReason
+import com.example.data.model.TransformKeyframe
 import com.example.data.model.VideoClip
 import com.example.data.model.VideoMetadata
+import com.example.data.model.ZoomDirection
 import com.example.data.repository.ProjectRepository
+import com.example.engine.EffectTransferEngine
+import com.example.engine.ReferenceAnalysisEngine
 import com.example.engine.SpeechAnalysisEngine
 import com.example.engine.VideoProcessor
 import com.example.engine.VideoSplitter
@@ -55,6 +62,9 @@ data class ExportUiState(
 
 data class EditorUiState(
     val currentScreen: AppScreen = AppScreen.HOME,
+    val referenceVideoUri: Uri? = null,
+    val referenceMetadata: VideoMetadata? = null,
+    val referenceProfile: ReferenceEditProfile? = null,
     val selectedVideoUri: Uri? = null,
     val metadata: VideoMetadata? = null,
     val waveform: FloatArray = FloatArray(120) { 0.1f },
@@ -62,6 +72,7 @@ data class EditorUiState(
     val selectedSplitId: String? = null,
     val clips: List<VideoClip> = emptyList(),
     val currentPlaybackMs: Long = 0L,
+    val currentScale: Float = 1.0f,
     val isPlaying: Boolean = false,
     val timelineZoom: Float = 1.0f,
     val currentProjectId: Long = 0L,
@@ -100,7 +111,21 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
         _editorState.update { it.copy(currentScreen = screen) }
     }
 
-    fun onVideoSelected(uri: Uri, startAnalysisImmediately: Boolean = true) {
+    fun onReferenceVideoSelected(uri: Uri) {
+        viewModelScope.launch {
+            val metaResult = VideoProcessor.extractMetadata(getApplication(), uri)
+            metaResult.onSuccess { meta ->
+                _editorState.update {
+                    it.copy(
+                        referenceVideoUri = uri,
+                        referenceMetadata = meta
+                    )
+                }
+            }
+        }
+    }
+
+    fun onNewVideoSelected(uri: Uri, startAnalysisImmediately: Boolean = true) {
         viewModelScope.launch {
             _analysisState.value = AnalysisUiState(
                 isAnalyzing = true,
@@ -113,6 +138,7 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                     selectedVideoUri = uri,
                     currentScreen = if (startAnalysisImmediately) AppScreen.ANALYSIS else AppScreen.EDITOR,
                     currentPlaybackMs = 0L,
+                    currentScale = 1.0f,
                     isPlaying = false,
                     splits = emptyList(),
                     selectedSplitId = null,
@@ -127,7 +153,7 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
             metadataResult.onSuccess { meta ->
                 _editorState.update { it.copy(metadata = meta) }
 
-                // Extract real audio waveform in parallel/sequence
+                // Extract real audio waveform
                 val waveform = WaveformExtractor.extractWaveform(
                     context = getApplication(),
                     uri = uri,
@@ -137,9 +163,8 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                 _editorState.update { it.copy(waveform = waveform) }
 
                 if (startAnalysisImmediately) {
-                    runSpeechAnalysis(uri, meta)
+                    runCompletePipeline(uri, meta)
                 } else {
-                    // Manual mode: compute clips from default empty splits
                     recomputeClips()
                 }
             }.onFailure { err ->
@@ -153,42 +178,94 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun onVideoSelected(uri: Uri, startAnalysisImmediately: Boolean = true) {
+        onNewVideoSelected(uri, startAnalysisImmediately)
+    }
+
     fun triggerAnalysis() {
         val uri = _editorState.value.selectedVideoUri ?: return
         val meta = _editorState.value.metadata ?: return
         _editorState.update { it.copy(currentScreen = AppScreen.ANALYSIS) }
-        runSpeechAnalysis(uri, meta)
+        runCompletePipeline(uri, meta)
     }
 
-    private fun runSpeechAnalysis(uri: Uri, metadata: VideoMetadata) {
+    private fun runCompletePipeline(newVideoUri: Uri, newMetadata: VideoMetadata) {
         analysisJob?.cancel()
         analysisJob = viewModelScope.launch {
             _analysisState.update {
-                it.copy(isAnalyzing = true, stage = "Analyzing audio & speech...", progress = 0.15f, errorMessage = null)
+                it.copy(
+                    isAnalyzing = true,
+                    stage = "Initializing video analysis...",
+                    progress = 0.05f,
+                    errorMessage = null
+                )
             }
 
             try {
-                val detectedSplits = SpeechAnalysisEngine.analyzeVideo(
-                    context = getApplication(),
-                    uri = uri,
-                    durationMs = metadata.durationMs,
-                    settings = _editorState.value.settings
-                ) { stage, progress ->
-                    _analysisState.update { it.copy(stage = stage, progress = progress) }
+                // PHASE 1: Reference Video Analysis
+                val refUri = _editorState.value.referenceVideoUri
+                val refMeta = _editorState.value.referenceMetadata
+
+                var referenceProfile: ReferenceEditProfile? = _editorState.value.referenceProfile
+
+                if (refUri != null && refMeta != null && referenceProfile == null) {
+                    _analysisState.update { it.copy(stage = "Analyzing reference video frame-by-frame...", progress = 0.10f) }
+                    val refResult = ReferenceAnalysisEngine.analyzeReferenceVideo(
+                        context = getApplication(),
+                        referenceUri = refUri,
+                        durationMs = refMeta.durationMs
+                    ) { stage, prog ->
+                        _analysisState.update {
+                            it.copy(
+                                stage = stage,
+                                progress = 0.10f + prog * 0.35f
+                            )
+                        }
+                    }
+                    referenceProfile = refResult.getOrNull()
+                    _editorState.update { it.copy(referenceProfile = referenceProfile) }
                 }
+
+                // PHASE 2: New Video Speech & Audio Analysis
+                _analysisState.update { it.copy(stage = "Analyzing new video speech & rhythm...", progress = 0.50f) }
+                val detectedSpeechSplits = SpeechAnalysisEngine.analyzeVideo(
+                    context = getApplication(),
+                    uri = newVideoUri,
+                    durationMs = newMetadata.durationMs,
+                    settings = _editorState.value.settings
+                ) { stage, prog ->
+                    _analysisState.update {
+                        it.copy(
+                            stage = stage,
+                            progress = 0.50f + prog * 0.35f
+                        )
+                    }
+                }
+
+                // PHASE 3: Map Reference Effect Curves onto Newly Detected Splits
+                _analysisState.update { it.copy(stage = "Mapping reference zoom curves to new splits...", progress = 0.90f) }
+                val finalSplitsWithKeyframes = EffectTransferEngine.mapReferenceEffectsToSplits(
+                    detectedSplits = detectedSpeechSplits,
+                    referenceProfile = referenceProfile,
+                    newVideoDurationMs = newMetadata.durationMs
+                )
 
                 _editorState.update {
                     it.copy(
-                        splits = detectedSplits,
+                        splits = finalSplitsWithKeyframes,
                         currentScreen = AppScreen.EDITOR
                     )
                 }
                 recomputeClips()
-
-                // Save project automatically
                 saveCurrentProject()
 
-                _analysisState.update { it.copy(isAnalyzing = false, stage = "Analysis complete.", progress = 1.0f) }
+                _analysisState.update {
+                    it.copy(
+                        isAnalyzing = false,
+                        stage = "Analysis complete.",
+                        progress = 1.0f
+                    )
+                }
             } catch (e: Exception) {
                 _analysisState.update {
                     it.copy(
@@ -207,12 +284,31 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
         recordUndoState()
 
+        val refPattern = _editorState.value.referenceProfile?.patterns?.firstOrNull() ?: ReferenceSegmentPattern(
+            segmentIndex = 1,
+            cutTimestampMs = 0L,
+            splitToZoomOffsetMs = -100L,
+            zoomDurationMs = 600L,
+            zoomDirection = ZoomDirection.ZOOM_OUT_THEN_IN,
+            scaleMin = 0.90f,
+            scaleMax = 1.15f,
+            easingType = EasingType.EASE_IN_OUT
+        )
+
+        val keyframes = listOf(
+            TransformKeyframe(timestampMs = (targetTime - 300L).coerceAtLeast(0L), scale = 1.0f),
+            TransformKeyframe(timestampMs = targetTime, scale = refPattern.scaleMin),
+            TransformKeyframe(timestampMs = (targetTime + 300L).coerceAtMost(meta.durationMs), scale = 1.0f)
+        )
+
         val newSplit = SplitPoint(
             timestampMs = targetTime,
             reason = SplitReason.MANUAL,
             confidence = 1.0f,
             isAi = false,
-            note = "Custom split at ${SplitPoint.formatTimestamp(targetTime)}"
+            note = "Custom split at ${SplitPoint.formatTimestamp(targetTime)}",
+            keyframes = keyframes,
+            appliedPattern = refPattern
         )
 
         val updated = (_editorState.value.splits + newSplit).sortedBy { it.timestampMs }
@@ -232,8 +328,14 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
         recordUndoState()
 
-        val updated = _editorState.value.splits.map {
-            if (it.id == id) it.copy(timestampMs = clampedTime) else it
+        val updated = _editorState.value.splits.map { split ->
+            if (split.id == id) {
+                val delta = clampedTime - split.timestampMs
+                val updatedKeyframes = split.keyframes.map { kf ->
+                    kf.copy(timestampMs = (kf.timestampMs + delta).coerceIn(0L, meta.durationMs))
+                }
+                split.copy(timestampMs = clampedTime, keyframes = updatedKeyframes)
+            } else split
         }.sortedBy { it.timestampMs }
 
         _editorState.update { it.copy(splits = updated) }
@@ -243,6 +345,19 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun updateSplitTime(id: String, newTimestampMs: Long) {
         updateSplitTimestamp(id, newTimestampMs)
+    }
+
+    fun updateZoomIntensity(splitId: String, intensity: Float) {
+        recordUndoState()
+        val clampedIntensity = intensity.coerceIn(0.2f, 2.5f)
+        val updated = _editorState.value.splits.map { split ->
+            if (split.id == splitId) {
+                split.copy(zoomIntensityMultiplier = clampedIntensity)
+            } else split
+        }
+        _editorState.update { it.copy(splits = updated) }
+        updateLiveScale(_editorState.value.currentPlaybackMs)
+        saveCurrentProject()
     }
 
     fun deleteSplit(id: String) {
@@ -273,6 +388,19 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
         val meta = _editorState.value.metadata ?: return
         val clamped = timeMs.coerceIn(0L, meta.durationMs)
         _editorState.update { it.copy(currentPlaybackMs = clamped) }
+        updateLiveScale(clamped)
+    }
+
+    private fun updateLiveScale(timeMs: Long) {
+        var computedScale = 1.0f
+        for (split in _editorState.value.splits) {
+            val scale = split.getScaleAt(timeMs)
+            if (kotlin.math.abs(scale - 1.0f) > 0.001f) {
+                computedScale = scale
+                break
+            }
+        }
+        _editorState.update { it.copy(currentScale = computedScale) }
     }
 
     fun setPlaying(playing: Boolean) {
@@ -348,7 +476,8 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
                     clipIndex = i + 1,
                     startMs = start,
                     endMs = split.timestampMs,
-                    splitReason = split.reason
+                    splitReason = split.reason,
+                    keyframes = split.keyframes
                 )
             )
             start = split.timestampMs
@@ -396,7 +525,6 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
         val clipsToExport = selectedClipsOnly ?: _editorState.value.clips
         if (clipsToExport.isEmpty()) return
 
-        // Prevent duplicate export runs
         if (_exportState.value.isExporting) return
 
         _exportState.value = ExportUiState(
@@ -411,7 +539,7 @@ class AutoSplitViewModel(application: Application) : AndroidViewModel(applicatio
 
         exportJob?.cancel()
         exportJob = viewModelScope.launch {
-            val result = VideoSplitter.exportClips(
+            VideoSplitter.exportClips(
                 context = getApplication(),
                 sourceUri = uri,
                 clips = clipsToExport

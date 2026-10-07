@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -26,6 +27,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -40,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ConfidenceLevel
 import com.example.data.model.SplitPoint
+import com.example.ui.theme.AutoSplitPrimary
 import com.example.ui.theme.ConfidenceHigh
 import com.example.ui.theme.ConfidenceLow
 import com.example.ui.theme.ConfidenceMed
@@ -49,6 +53,7 @@ fun SplitMarkerDetailsCard(
     split: SplitPoint,
     splitIndex: Int,
     onMoveTimeOffset: (deltaMs: Long) -> Unit,
+    onUpdateZoomIntensity: (Float) -> Unit = {},
     onDelete: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
@@ -56,12 +61,10 @@ fun SplitMarkerDetailsCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .testTag("split_details_card"),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
@@ -85,44 +88,25 @@ fun SplitMarkerDetailsCard(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    if (split.isAi) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Text(
-                                text = "AI SPLIT",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
-                                ),
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    } else {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFD1FAE5)
-                        ) {
-                            Text(
-                                text = "MANUAL",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
-                                ),
-                                color = Color(0xFF065F46),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Text(
+                            text = if (split.isAi) "AI REFERENCE EFFECT" else "MANUAL CUT",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp
+                            ),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
                     }
                 }
 
                 IconButton(
                     onClick = onClose,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .testTag("close_split_details")
+                    modifier = Modifier.size(34.dp).testTag("close_split_details")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -132,17 +116,16 @@ fun SplitMarkerDetailsCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Time, Reason, and Confidence Grid
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Time
                 Column {
                     Text(
-                        text = "TIME",
+                        text = "TIMESTAMP",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -150,13 +133,12 @@ fun SplitMarkerDetailsCard(
                         text = split.formattedTime,
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 16.sp
+                            fontSize = 15.sp
                         ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
-                // Reason
                 Column {
                     Text(
                         text = "REASON",
@@ -164,19 +146,16 @@ fun SplitMarkerDetailsCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = split.reason.icon, fontSize = 14.sp)
+                        Text(text = split.reason.icon, fontSize = 13.sp)
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = split.reason.displayName,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.Medium
-                            ),
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
 
-                // Confidence
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = "CONFIDENCE",
@@ -207,16 +186,98 @@ fun SplitMarkerDetailsCard(
                 }
             }
 
-            if (split.note.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
+            // EFFECT TIMELINE FLOW: Speech End -> Split -> Zoom Out / Zoom In
+            Spacer(modifier = Modifier.height(12.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFF8FAFC)
+            ) {
+                Column(modifier = Modifier.padding(10.dp)) {
+                    Text(
+                        text = "REFERENCE EFFECT PATTERN",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = AutoSplitPrimary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Speech End  →  Split (${split.formattedTime})  →  ${split.appliedPattern?.zoomDirection?.label ?: "Zoom Out → In"}",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Timing: ${split.appliedPattern?.zoomTiming?.label ?: "Spans Across Split"} • Easing: ${split.appliedPattern?.easingType?.label ?: "Ease In-Out"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // KEYFRAME LIST
+            if (split.keyframes.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = split.note,
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "TRANSFORM KEYFRAMES (${split.keyframes.size})",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    split.keyframes.take(4).forEach { kf ->
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFEEF2FF)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = String.format("%.2fx", kf.scale * split.zoomIntensityMultiplier),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = AutoSplitPrimary
+                                )
+                                Text(
+                                    text = SplitPoint.formatTimestamp(kf.timestampMs),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // ZOOM INTENSITY SLIDER
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Zoom Intensity: ${String.format("%.1fx", split.zoomIntensityMultiplier)}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Slider(
+                    value = split.zoomIntensityMultiplier,
+                    onValueChange = onUpdateZoomIntensity,
+                    valueRange = 0.5f..2.0f,
+                    steps = 5,
+                    colors = SliderDefaults.colors(
+                        thumbColor = AutoSplitPrimary,
+                        activeTrackColor = AutoSplitPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Action Buttons: Fine-tune Move (-100ms / +100ms) and Delete
             Row(
@@ -226,36 +287,22 @@ fun SplitMarkerDetailsCard(
             ) {
                 OutlinedButton(
                     onClick = { onMoveTimeOffset(-100L) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .minimumInteractiveComponentSize()
-                        .testTag("nudge_back_split"),
+                    modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("nudge_back_split"),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.FastRewind,
-                        contentDescription = "Move Left",
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Icon(imageVector = Icons.Default.FastRewind, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(text = "-0.1s", fontSize = 12.sp)
                 }
 
                 OutlinedButton(
                     onClick = { onMoveTimeOffset(100L) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .minimumInteractiveComponentSize()
-                        .testTag("nudge_forward_split"),
+                    modifier = Modifier.weight(1f).minimumInteractiveComponentSize().testTag("nudge_forward_split"),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(text = "+0.1s", fontSize = 12.sp)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Default.FastForward,
-                        contentDescription = "Move Right",
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Icon(imageVector = Icons.Default.FastForward, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
 
                 Button(
@@ -265,15 +312,9 @@ fun SplitMarkerDetailsCard(
                         contentColor = Color(0xFFDC2626)
                     ),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .testTag("delete_split_button")
+                    modifier = Modifier.minimumInteractiveComponentSize().testTag("delete_split_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(text = "Delete", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }

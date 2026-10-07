@@ -307,9 +307,36 @@ private fun DrawScope.drawSplitMarker(
     )
 
     // Top Flag / Badge
-    val badgeWidth = 26.dp.toPx()
+    val badgeWidth = 28.dp.toPx()
     val badgeHeight = 16.dp.toPx()
     val badgeTop = 6.dp.toPx()
+
+    // Draw Zoom Effect Region Highlight & Keyframes if present
+    if (split.keyframes.isNotEmpty()) {
+        val firstKfTime = split.keyframes.first().timestampMs
+        val lastKfTime = split.keyframes.last().timestampMs
+        val kfStartPx = (firstKfTime.toFloat() / durationMs) * totalWidth
+        val kfEndPx = (lastKfTime.toFloat() / durationMs) * totalWidth
+
+        // Draw translucent zoom active region
+        drawRoundRect(
+            color = markerColor.copy(alpha = if (isSelected) 0.22f else 0.12f),
+            topLeft = Offset(kfStartPx, rulerHeight),
+            size = Size((kfEndPx - kfStartPx).coerceAtLeast(4.dp.toPx()), canvasHeight - rulerHeight),
+            cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+        )
+
+        // Draw keyframe diamonds on timeline
+        for (kf in split.keyframes) {
+            val kfX = (kf.timestampMs.toFloat() / durationMs) * totalWidth
+            val kfY = rulerHeight + 12.dp.toPx()
+            drawCircle(
+                color = if (isSelected) SplitMarkerSelected else Color(0xFF38BDF8),
+                radius = 3.5.dp.toPx(),
+                center = Offset(kfX, kfY)
+            )
+        }
+    }
 
     drawRoundRect(
         color = markerColor,
@@ -327,7 +354,15 @@ private fun DrawScope.drawSplitMarker(
         isAntiAlias = true
     }
 
-    val label = if (split.isAi) "#$splitIndex" else "✂"
+    val label = if (split.isAi) {
+        when (split.appliedPattern?.zoomDirection) {
+            com.example.data.model.ZoomDirection.ZOOM_OUT -> "↓#$splitIndex"
+            com.example.data.model.ZoomDirection.ZOOM_IN -> "↑#$splitIndex"
+            com.example.data.model.ZoomDirection.ZOOM_OUT_THEN_IN -> "↕#$splitIndex"
+            com.example.data.model.ZoomDirection.ZOOM_IN_THEN_OUT -> "↕#$splitIndex"
+            else -> "#$splitIndex"
+        }
+    } else "✂"
     drawContext.canvas.nativeCanvas.drawText(
         label,
         x,

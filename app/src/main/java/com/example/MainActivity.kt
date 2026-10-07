@@ -67,9 +67,17 @@ class MainActivity : ComponentActivity() {
                         when (editorState.currentScreen) {
                             AppScreen.HOME -> {
                                 HomeScreen(
+                                    referenceMetadata = editorState.referenceMetadata,
+                                    newVideoMetadata = editorState.metadata,
                                     recentProjects = recentProjects,
-                                    onVideoSelected = { uri, withAnalysis ->
-                                        viewModel.onVideoSelected(uri, withAnalysis)
+                                    onReferenceVideoSelected = { uri ->
+                                        viewModel.onReferenceVideoSelected(uri)
+                                    },
+                                    onNewVideoSelected = { uri ->
+                                        viewModel.onNewVideoSelected(uri, startAnalysisImmediately = false)
+                                    },
+                                    onStartPipeline = {
+                                        viewModel.triggerAnalysis()
                                     },
                                     onOpenProject = { project ->
                                         viewModel.loadProject(project)
@@ -108,6 +116,7 @@ class MainActivity : ComponentActivity() {
                                     onAddSplit = { viewModel.addManualSplit() },
                                     onSelectSplit = { id -> viewModel.selectSplit(id) },
                                     onUpdateSplitTime = { id, ms -> viewModel.updateSplitTime(id, ms) },
+                                    onUpdateZoomIntensity = { id, intensity -> viewModel.updateZoomIntensity(id, intensity) },
                                     onDeleteSplit = { id -> viewModel.deleteSplit(id) },
                                     onUndo = { viewModel.undo() },
                                     onRedo = { viewModel.redo() },
